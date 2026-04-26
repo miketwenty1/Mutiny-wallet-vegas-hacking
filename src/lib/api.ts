@@ -1,5 +1,9 @@
 import { apiBase } from "./config";
 
+function safeJsonStringify(v: unknown): string {
+  return JSON.stringify(v, (_k, val) => (typeof val === "bigint" ? val.toString() : val));
+}
+
 async function parseJson(res: Response): Promise<unknown> {
   const text = await res.text();
   try {
@@ -14,13 +18,13 @@ export async function rpc<T>(method: string, params: unknown[] = []): Promise<T>
   const res = await fetch(`${base}/v1/rpc`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
+    body: safeJsonStringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
   });
   const j = (await parseJson(res)) as {
     result?: T;
     error?: { code: number; message: string };
   };
-  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  if (j.error) throw new Error(j.error.message || safeJsonStringify(j.error));
   if (j.result === undefined) throw new Error("RPC: missing result");
   return j.result;
 }
@@ -58,10 +62,10 @@ export async function broadcastTx(hex: string): Promise<string> {
   const j = await parseJson(res);
   if (typeof j === "object" && j && "error" in j) {
     const e = (j as { error?: string }).error;
-    throw new Error(e || JSON.stringify(j));
+    throw new Error(e || safeJsonStringify(j));
   }
   if (typeof j === "string") return j;
   if (typeof j === "object" && j && "txid" in j) return String((j as { txid: string }).txid);
   if (typeof j === "object" && j && "result" in j) return String((j as { result: unknown }).result);
-  return JSON.stringify(j);
+  return safeJsonStringify(j);
 }

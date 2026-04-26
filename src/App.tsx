@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "./App.css";
 import { getChain } from "./lib/api";
 import { fxReceiveFunds, fxSendFunds } from "./lib/fx";
 import { loadMnemonic, saveMnemonic } from "./lib/storage";
 import { scanWalletUtxos, type ScannedUtxo } from "./lib/scan";
+import { btcInputToSats } from "./lib/btcAmount";
 import { buildSignBroadcastP2wpkh } from "./lib/tx";
+import { appBuildTime, appVersion, versionSummary } from "./lib/version";
 import { createMnemonic12, p2wpkhAddress, receiveKey, rootFromMnemonic } from "./lib/wallet";
 import type { HDKey } from "@scure/bip32";
 
@@ -17,6 +20,23 @@ const EXPECT_MAX_MS = 20 * 60 * 1000;
 
 function satsToBtc(s: number): string {
   return (s / 1e8).toFixed(8);
+}
+
+/** Portaled to `document.body` so parent layout/transforms never hide the build stamp. */
+function BuildStampCorner() {
+  return (
+    <div
+      className="build-stamp-corner mono"
+      data-app-version={versionSummary()}
+      title={versionSummary()}
+      aria-label={`Wallet version ${versionSummary()}`}
+    >
+      <div className="build-stamp-corner__line build-stamp-corner__ver">v{appVersion()}</div>
+      <div className="build-stamp-corner__line build-stamp-corner__when">
+        {appBuildTime().replace("T", " ").slice(0, 19)} UTC
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -91,6 +111,11 @@ export default function App() {
     void refreshChain();
   }, [refreshChain]);
 
+  useEffect(() => {
+    document.title = `Mutinynet v${appVersion()}`;
+    console.info(`[mutinynet-wallet] ${versionSummary()}`);
+  }, []);
+
   const runScan = useCallback(async () => {
     if (!root) return;
     const id = ++scanSeqRef.current;
@@ -162,9 +187,7 @@ export default function App() {
     setSending(true);
     setErr(null);
     try {
-      const amt = Number(sendBtc);
-      if (!Number.isFinite(amt) || amt <= 0) throw new Error("Enter a valid BTC amount.");
-      const sats = Math.round(amt * 1e8);
+      const sats = btcInputToSats(sendBtc);
       await buildSignBroadcastP2wpkh({
         root,
         utxos,
@@ -192,17 +215,21 @@ export default function App() {
 
   if (!mnemonic || !root) {
     return (
-      <div className="shell boot">
-        <div className="boot-inner">
-          <div className="boot-ring" />
-          <p className="boot-text">Arming wallet…</p>
+      <>
+        <div className="shell boot">
+          <div className="boot-inner">
+            <div className="boot-ring" />
+            <p className="boot-text">Arming wallet…</p>
+          </div>
         </div>
-      </div>
+        {createPortal(<BuildStampCorner />, document.body)}
+      </>
     );
   }
 
   return (
-    <div className="shell">
+    <>
+      <div className="shell">
       {sendFx ? (
         <div className="send-fx" aria-hidden>
           <div className="send-fx-bg">
@@ -344,13 +371,19 @@ export default function App() {
         )}
       </section>
 
-      <p className="fineprint">
+      <p className="fineprint version-foot" data-app-version={versionSummary()} title={versionSummary()}>
+        <span className="version-pill mono">
+          Wallet {appVersion()} · build {appBuildTime()}
+        </span>
+        <br />
         12-word seed is stored in this browser only (not encrypted). Scan uses <code>scantxoutset</code> (confirmed UTXOs
         only). API:{" "}
         <a href="http://3.231.31.216:3000/docs" target="_blank" rel="noreferrer">
           docs
         </a>
       </p>
-    </div>
+      </div>
+      {createPortal(<BuildStampCorner />, document.body)}
+    </>
   );
 }

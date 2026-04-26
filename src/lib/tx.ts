@@ -7,6 +7,18 @@ import type { ScannedUtxo } from "./scan";
 
 const DUST_SATS = 294;
 
+/**
+ * Segwit amounts must be UInt53 numbers. Coerce so fee math and signing never see
+ * `bigint` (some deps stringify errors with plain `JSON.stringify` and crash).
+ */
+function satsUInt53(n: number | bigint): number {
+  const raw = typeof n === "bigint" ? Number(n) : n;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) throw new Error("Invalid satoshi amount");
+  const v = Math.floor(raw);
+  if (!Number.isSafeInteger(v) || v < 0) throw new Error("Invalid satoshi amount");
+  return v;
+}
+
 function feerateToFeeSats(feerateBtcPerKb: number, vbytes: number): number {
   return Math.max(1, Math.ceil(feerateBtcPerKb * 1e8 * (vbytes / 1000)));
 }
@@ -72,7 +84,8 @@ export async function buildSignBroadcastP2wpkh(params: {
   changeGap: number;
   feeTargetBlocks?: number;
 }): Promise<string> {
-  const { root, utxos, toAddress, amountSats, receiveGap, changeGap } = params;
+  const { root, utxos, toAddress, receiveGap, changeGap } = params;
+  const amountSats = satsUInt53(params.amountSats);
   if (amountSats <= 0) throw new Error("Amount must be positive");
   try {
     bitcoin.address.toOutputScript(toAddress, network);
@@ -80,38 +93,40 @@ export async function buildSignBroadcastP2wpkh(params: {
     throw new Error("Invalid destination address for this network");
   }
 
-  const sorted = [...utxos].sort((a, b) => b.amountSats - a.amountSats);
+  const sorted = [...utxos]
+    .map((u) => ({ ...u, amountSats: satsUInt53(u.amountSats) }))
+    .sort((a, b) => b.amountSats - a.amountSats);
   const feerate = await getFeeRateBtcPerKb(params.feeTargetBlocks ?? 6);
   const { selected, fee, change } = selectUtxos(sorted, amountSats, feerate);
   const totalIn = selected.reduce((s, x) => s + x.amountSats, 0);
   if (totalIn !== amountSats + fee + change) throw new Error("Inconsistent fee plan");
 
-  const psbt = new bitcoin.Psbt({ network });
+  // Build + sign without PSBT/bip174: their validation errors use JSON.stringify and
+  // blow up if any nested value is a BigInt (common pain with PSBT tooling).
+  const tx = new bitcoin.Transaction();
+  tx.version = 2;
   for (const u of selected) {
-    psbt.addInput({
-      hash: u.txid,
-      index: u.vout,
-      witnessUtxo: {
-        script: Buffer.from(u.scriptHex, "hex"),
-        value: BigInt(u.amountSats),
-      },
-    });
+    tx.addInput(Buffer.from(u.txid, "hex").reverse(), u.vout, 0xffffffff);
   }
-  psbt.addOutput({ address: toAddress, value: BigInt(amountSats) });
+  tx.addOutput(bitcoin.address.toOutputScript(toAddress, network), amountSats);
   if (change >= DUST_SATS) {
     const chAddr = bitcoin.payments.p2wpkh({
       pubkey: Buffer.from(changeKey(root, 0).publicKey!),
       network,
     }).address!;
-    psbt.addOutput({ address: chAddr, value: BigInt(change) });
+    tx.addOutput(bitcoin.address.toOutputScript(chAddr, network), satsUInt53(change));
   }
 
+  const sighashType = bitcoin.Transaction.SIGHASH_ALL;
   for (let i = 0; i < selected.length; i++) {
     const u = selected[i]!;
-    const hd = findSigningKey(root, u.pubkeyHex, receiveGap, changeGap);
-    psbt.signInput(i, keypairForSigning(hd));
+    const prevOutScript = Buffer.from(u.scriptHex, "hex");
+    const signingScript = bitcoin.payments.p2pkh({ hash: prevOutScript.subarray(2) }).output!;
+    const kp = keypairForSigning(findSigningKey(root, u.pubkeyHex, receiveGap, changeGap));
+    const hash = tx.hashForWitnessV0(i, signingScript, u.amountSats, sighashType);
+    const sig = bitcoin.script.signature.encode(kp.sign(hash), sighashType);
+    tx.setWitness(i, [sig, Buffer.from(kp.publicKey)]);
   }
 
-  psbt.finalizeAllInputs();
-  return broadcastTx(psbt.extractTransaction().toHex());
+  return broadcastTx(tx.toHex());
 }
