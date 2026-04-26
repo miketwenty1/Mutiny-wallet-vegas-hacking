@@ -117,10 +117,17 @@
 
 .card-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.35rem;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
 }
 
 .card-head h2 {
@@ -199,6 +206,22 @@
 .btn-ghost:hover:not(:disabled) {
   color: var(--text);
   border-color: rgba(247, 147, 26, 0.5);
+}
+
+.btn-ghost--on {
+  border-color: rgba(92, 219, 149, 0.65);
+  color: var(--ok);
+  box-shadow: 0 0 12px rgba(92, 219, 149, 0.2);
+}
+
+.scan-meta {
+  margin-top: 0.45rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.scan-meta--live {
+  color: var(--ok);
 }
 
 .btn-receive {

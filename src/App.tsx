@@ -8,10 +8,12 @@ import { buildSignBroadcastP2wpkh } from "./lib/tx";
 import { createMnemonic12, p2wpkhAddress, receiveKey, rootFromMnemonic } from "./lib/wallet";
 import type { HDKey } from "@scure/bip32";
 
-const RECEIVE_GAP = 25;
-const CHANGE_GAP = 6;
+const RECEIVE_GAP = 60;
+const CHANGE_GAP = 12;
 const SEND_FX_MS = 3800;
 const RECEIVE_FX_MS = 4200;
+const EXPECT_POLL_MS = 12_000;
+const EXPECT_MAX_MS = 20 * 60 * 1000;
 
 function satsToBtc(s: number): string {
   return (s / 1e8).toFixed(8);
@@ -23,16 +25,19 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [utxos, setUtxos] = useState<ScannedUtxo[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [lastScan, setLastScan] = useState<string | null>(null);
   const [sendTo, setSendTo] = useState("");
   const [sendBtc, setSendBtc] = useState("");
   const [sending, setSending] = useState(false);
   const [sendFx, setSendFx] = useState(false);
   const [receiveFx, setReceiveFx] = useState(false);
+  const [expectIncoming, setExpectIncoming] = useState(false);
   const prevSatsRef = useRef<number | null>(null);
   const sendTimerRef = useRef<number | null>(null);
   const receiveTimerRef = useRef<number | null>(null);
-  /** Skip “receive” FX on the first scan of the session (avoids firing on cold load / refresh). */
   const scanBaselineDoneRef = useRef(false);
+  const scanSeqRef = useRef(0);
+  const runScanRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     let m = loadMnemonic();
@@ -76,7 +81,6 @@ export default function App() {
       const blocks = typeof c.blocks === "number" ? c.blocks : "?";
       const ch = typeof c.chain === "string" ? c.chain : "?";
       setChainLine(`Mutiny · ${ch} · ${blocks}`);
-      setErr(null);
     } catch (e) {
       setChainLine("offline");
       setErr(e instanceof Error ? e.message : String(e));
@@ -89,6 +93,7 @@ export default function App() {
 
   const runScan = useCallback(async () => {
     if (!root) return;
+    const id = ++scanSeqRef.current;
     setScanning(true);
     setErr(null);
     try {
@@ -96,14 +101,19 @@ export default function App() {
         receiveGap: RECEIVE_GAP,
         changeGap: CHANGE_GAP,
       });
+      if (id !== scanSeqRef.current) return;
+
       const next = u.reduce((s, x) => s + x.amountSats, 0);
       const prev = prevSatsRef.current;
       prevSatsRef.current = next;
       setUtxos(u);
+      setLastScan(new Date().toLocaleTimeString());
+
       const baselineReady = scanBaselineDoneRef.current;
       if (!scanBaselineDoneRef.current) scanBaselineDoneRef.current = true;
       const grew = baselineReady && prev !== null && next > prev;
       if (grew) {
+        setExpectIncoming(false);
         if (receiveTimerRef.current) window.clearTimeout(receiveTimerRef.current);
         setReceiveFx(true);
         fxReceiveFunds();
@@ -113,15 +123,30 @@ export default function App() {
         }, RECEIVE_FX_MS);
       }
     } catch (e) {
+      if (id !== scanSeqRef.current) return;
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setScanning(false);
+      if (id === scanSeqRef.current) setScanning(false);
     }
   }, [root]);
+
+  runScanRef.current = runScan;
 
   useEffect(() => {
     if (root) void runScan();
   }, [root, runScan]);
+
+  useEffect(() => {
+    if (!expectIncoming) return;
+    void runScanRef.current();
+    const tick = () => void runScanRef.current();
+    const interval = window.setInterval(tick, EXPECT_POLL_MS);
+    const maxT = window.setTimeout(() => setExpectIncoming(false), EXPECT_MAX_MS);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(maxT);
+    };
+  }, [expectIncoming]);
 
   async function onCopyReceive() {
     if (!receiveAddr) return;
@@ -231,12 +256,24 @@ export default function App() {
       <section className="card balance-card">
         <div className="card-head">
           <h2>Balance</h2>
-          <button type="button" className="btn-ghost" disabled={scanning} onClick={() => void runScan()}>
-            {scanning ? "Scanning…" : "Refresh"}
-          </button>
+          <div className="card-actions">
+            <button type="button" className="btn-ghost" disabled={scanning} onClick={() => void runScan()}>
+              {scanning ? "Scanning…" : "Refresh"}
+            </button>
+            <button
+              type="button"
+              className={expectIncoming ? "btn-ghost btn-ghost--on" : "btn-ghost"}
+              disabled={scanning}
+              onClick={() => setExpectIncoming((v) => !v)}
+            >
+              {expectIncoming ? "Stop waiting" : "Wait for payment"}
+            </button>
+          </div>
         </div>
         <div className="balance-big">{satsToBtc(totalSats)}</div>
-        <div className="unit">BTC (signet)</div>
+        <div className="unit">BTC (signet) · {utxos.length} UTXO{utxos.length === 1 ? "" : "s"}</div>
+        {lastScan ? <div className="scan-meta">Last scan: {lastScan}</div> : null}
+        {expectIncoming ? <div className="scan-meta scan-meta--live">Auto-refresh every {EXPECT_POLL_MS / 1000}s (max 20 min)</div> : null}
       </section>
 
       <section className="card receive-card">
@@ -274,7 +311,7 @@ export default function App() {
           <span className="btn-launch-icon">☢</span>
           {sending ? "ARMING…" : "LAUNCH PAYMENT"}
         </button>
-        {utxos.length === 0 ? <p className="hint">Fund your receive address, then hit Refresh.</p> : null}
+        {utxos.length === 0 ? <p className="hint">Fund your receive address, then Refresh or turn on Wait for payment.</p> : null}
       </section>
 
       <section className="card">
@@ -308,7 +345,8 @@ export default function App() {
       </section>
 
       <p className="fineprint">
-        12-word seed is stored in this browser only (not encrypted). Toy / demo use. API:{" "}
+        12-word seed is stored in this browser only (not encrypted). Scan uses <code>scantxoutset</code> (confirmed UTXOs
+        only). API:{" "}
         <a href="http://3.231.31.216:3000/docs" target="_blank" rel="noreferrer">
           docs
         </a>
