@@ -1,27 +1,24 @@
-const KEY = "mutinynet-web-wallet-v1";
+const KEY = "mutinynet-web-wallet-v2";
+const LEGACY_KEY = "mutinynet-web-wallet-v1";
 
-export type StoredWallet = {
-  version: 1;
-  /** AES-GCM payload (base64) of UTF-8 mnemonic phrase */
-  ciphertext: string;
-};
-
-export function loadWallet(): StoredWallet | null {
+/** Plain mnemonic in localStorage (no password). */
+export function loadMnemonic(): string | null {
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
-    const j = JSON.parse(raw) as StoredWallet;
-    if (j?.version !== 1 || typeof j.ciphertext !== "string") return null;
-    return j;
+    const j = JSON.parse(raw) as { version?: number; mnemonic?: string };
+    if (j?.version === 2 && typeof j.mnemonic === "string" && j.mnemonic.trim()) return j.mnemonic.trim();
   } catch {
-    return null;
+    /* ignore */
   }
+  return null;
 }
 
-export function saveWallet(w: StoredWallet): void {
-  localStorage.setItem(KEY, JSON.stringify(w));
+export function saveMnemonic(mnemonic: string): void {
+  localStorage.removeItem(LEGACY_KEY);
+  localStorage.setItem(KEY, JSON.stringify({ version: 2, mnemonic: mnemonic.trim() }));
 }
 
-export function clearWallet(): void {
+export function clearMnemonic(): void {
   localStorage.removeItem(KEY);
 }
