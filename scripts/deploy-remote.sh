@@ -23,6 +23,9 @@ SSH=(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Avoid macOS tar copying xattrs that GNU tar warns about on Linux.
+export COPYFILE_DISABLE=1
+
 "${SSH[@]}" "$REMOTE" "mkdir -p '$REMOTE_DIR'"
 tar -C "$ROOT" \
   --exclude='./.git' \
