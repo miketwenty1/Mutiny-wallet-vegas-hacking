@@ -1,7 +1,7 @@
 import * as bitcoin from "bitcoinjs-lib";
 import { HDKey } from "@scure/bip32";
 import { mnemonicToSeedSync, validateMnemonic, generateMnemonic } from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english.js";
+import { wordlist } from "@scure/bip39/wordlists/english";
 import { ECPair, network } from "./bitcoin";
 
 /** BIP32 versions for signet / testnet (tb1…). */

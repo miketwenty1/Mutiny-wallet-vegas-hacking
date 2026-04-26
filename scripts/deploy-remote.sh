@@ -33,6 +33,6 @@ tar -C "$ROOT" \
   --exclude='./dist' \
   -czf - . | "${SSH[@]}" "$REMOTE" "tar -xzf - -C '$REMOTE_DIR'"
 
-"${SSH[@]}" "$REMOTE" "cd '$REMOTE_DIR' && docker compose build --pull && docker compose up -d"
+"${SSH[@]}" "$REMOTE" "sudo usermod -aG docker ubuntu 2>/dev/null || true; cd '$REMOTE_DIR' && sudo docker compose build --pull && sudo docker compose up -d"
 HOST="${REMOTE#*@}"
 echo "Done. Open http://${HOST}/ (port 80). Mutiny API must be listening on the host at :3000 for /api proxy."

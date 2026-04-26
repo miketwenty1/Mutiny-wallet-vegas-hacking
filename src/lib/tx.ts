@@ -1,8 +1,8 @@
 import * as bitcoin from "bitcoinjs-lib";
 import { HDKey } from "@scure/bip32";
 import { broadcastTx, getFeeRateBtcPerKb } from "./api";
-import { keypairForSigning, network } from "./bitcoin";
-import { changeKey, receiveKey } from "./wallet";
+import { network } from "./bitcoin";
+import { changeKey, keypairForSigning, receiveKey } from "./wallet";
 import type { ScannedUtxo } from "./scan";
 
 const DUST_SATS = 294;
