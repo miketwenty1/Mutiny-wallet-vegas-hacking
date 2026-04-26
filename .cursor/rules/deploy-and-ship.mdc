@@ -1,0 +1,29 @@
+---
+description: After substantive wallet changes, commit, push to GitHub, and deploy to EC2.
+alwaysApply: true
+---
+
+# Commit, push, and deploy (substantive changes)
+
+When you finish **substantive** work on this repo (multi-file features, security or wallet behavior, send/scan/API paths, Docker/nginx/deploy scripts, version bumps, or anything the user would expect to see on **http://3.231.31.216/**), you **must** ship it end-to-end unless the user explicitly says not to deploy or not to commit.
+
+## Steps (run from repo root)
+
+1. **Review** `git status` — ensure only intentional changes are included.
+2. **Commit** with a clear message: `git add -A && git commit -m "…"`
+3. **Push**: `git push origin main`
+4. **Deploy to EC2** (builds Docker on the server from the copied tree):
+
+```bash
+export SSH_KEY="${SSH_KEY:-$HOME/Downloads/newpair-april25-vegas-2026.pem}"
+chmod 600 "$SSH_KEY" 2>/dev/null || true
+./scripts/deploy-remote.sh ubuntu@3.231.31.216
+```
+
+- If `SSH_KEY` is missing, tell the user and stop after push.
+- If deploy fails (SSH, Docker, compose), capture the error, retry once if reasonable, then summarize what succeeded (commit/push) and what failed.
+
+## Notes
+
+- The Mutiny HTTP API must still be on the host at **:3000** for nginx `/api` proxy.
+- Do not skip **push** if the user cares about GitHub staying in sync with production.
